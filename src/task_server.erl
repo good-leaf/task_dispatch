@@ -74,7 +74,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  erlang:send_after(10000, self(), check),
+  erlang:send_after(5000, self(), check),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -127,7 +127,12 @@ handle_info(check, State) ->
   [FirstNode | _Node] = lists:sort(nodes() ++ [node()]),
   case FirstNode == node() of
     true ->
-      check_change();
+      try
+        check_change()
+      catch
+          E:R  ->
+            error_logger:error_msg("check task change failed, error:~p, reason:~p", [E, R])
+      end;
     false ->
       ok
   end,
@@ -182,6 +187,16 @@ mwrite(Table, Record) ->
       error
   end.
 
+ensure_mwrite(_Table, _Record, 0)
+  ok;
+ensure_mwrite(Table, Record, Retry) ->
+  case mwrite(Table, Record) of
+    ok ->
+      ok;
+    error ->
+      ensure_mwrite(Table, Record, Retry - 1)
+  end.
+
 mquery(Table) ->
   F = fun() ->
     Q = qlc:q([E || E <- mnesia:table(Table)]),
@@ -200,10 +215,22 @@ mdelete(Table, Key) ->
     mnesia:delete({Table, Key})
   end,
   case mnesia:transaction(F) of
-    {atomic, R} ->
-      {ok, R};
+    {atomic, _R} ->
+      error_logger:info_msg("mnesia delete table:~p, key:~p", [Table, Key]),
+      ok;
     {aborted, Reason} ->
-      {error, Reason}
+      error_logger:error_msg("mnesia delete table:~p, key:~p failed, reason:~p", [Table, Key, Reason]),
+      error
+  end.
+
+ensure_mdelete(_Table, _Key, 0) ->
+  ok;
+ensure_mdelete(Table, Key, Retry) ->
+  case mdelete(Table, Key) of
+    ok ->
+      ok;
+    error ->
+      ensure_mdelete(Table, Key, Retry - 1)
   end.
 
 mdelete(Table) ->
@@ -436,9 +463,9 @@ local_task(TaskModule, Function, TaskList) ->
         %设置节点任务信息
         case Function of
           task_notice ->
-            mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), node(), TaskInfo});
+             ensure_mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), node(), TaskInfo}, 3);
           task_cancel ->
-            mdelete(dispatch_task, task_id(TaskInfo))
+             ensure_mdelete(dispatch_task, task_id(TaskInfo), 3)
         end;
       error ->
         ignore
@@ -463,9 +490,9 @@ remote_task(Node, Module, Function, Args, Retry) ->
       %设置节点任务信息
       case Function of
         task_notice ->
-          mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args});
+          ensure_mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args}, 3);
         task_cancel ->
-          mdelete(dispatch_task, task_id(Args))
+          ensure_mdelete(dispatch_task, task_id(Args), 3)
       end,
       ok
   end.
