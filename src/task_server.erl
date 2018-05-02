@@ -260,7 +260,12 @@ dispatch_task(RunningNode, [], _TaskInfo) ->
                 true ->
                   length(TaskList) div length(RunningNode);
                 false ->
-                  length(TaskList) div length(RunningNode) + 1
+                  case length(TaskList) rem 2 == 0 of
+                    true ->
+                      length(TaskList) div length(RunningNode);
+                    false ->
+                      length(TaskList) div length(RunningNode) + 1
+                  end
               end,
   GroupList = group_task(GroupSize, TaskList, []),
 
@@ -291,7 +296,12 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
                 true ->
                   length(TaskList) div length(RunningNode);
                 false ->
-                  length(TaskList) div length(RunningNode) + 1
+                  case length(TaskList) rem 2 == 0 of
+                    true ->
+                      length(TaskList) div length(RunningNode);
+                    false ->
+                      length(TaskList) div length(RunningNode) + 1
+                  end
               end,
   %停止节点的任务列表 + 之前分配没有功能的任务列表
   StopRunningTasks = TaskList -- node_task_list(LastDispatchNodes -- StopRunningNodes, TaskInfo),
@@ -448,8 +458,8 @@ remote_task(Node, Module, Function, Args, Retry) ->
         [Node, Module, Function, Args, Reason]),
       remote_task(Node, Module, Function, Args, Retry - 1);
     ok ->
-      error_logger:info_msg("rpc node:~p, module:~p, function:~p, args:~p success, response:~p",
-        [Node, Module, Function, Args, ok]),
+      error_logger:info_msg("rpc node:~p, module:~p, function:~p, args:~p success",
+        [Node, Module, Function, Args]),
       %设置节点任务信息
       case Function of
         task_notice ->
