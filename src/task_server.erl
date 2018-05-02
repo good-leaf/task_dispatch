@@ -187,7 +187,7 @@ mwrite(Table, Record) ->
       error
   end.
 
-ensure_mwrite(_Table, _Record, 0)
+ensure_mwrite(_Table, _Record, 0) ->
   ok;
 ensure_mwrite(Table, Record, Retry) ->
   case mwrite(Table, Record) of
