@@ -298,7 +298,6 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
                     add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
                 false ->
                     %节点数变大
-
                     ok
             end
     end.
@@ -340,30 +339,30 @@ add_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
             end
     end.
 
-subtract_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
-    TaskModule = ?TASK_MODULE,
-    [FirstNode | OtherNodes] = RunningNodes,
-    case proplists:get_value(FirstNode, TaskInfoList) of
-        undefined ->
-            {HeadList, TailList} = lists:split(GroupSize, StopRunningTasks),
-            compare_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
-        VList ->
-            DiffValue = GroupSize - length(VList),
-            case DiffValue > 0 of
-                true ->
-                    {HeadList, TailList} = lists:split(DiffValue, StopRunningTasks),
-                    case FirstNode == node() of
-                        true ->
-                            %本节点任务
-                            local_task(TaskModule, task_notice, HeadList);
-                        false ->
-                            [remote_task(FirstNode, TaskModule, task_notice, TaskInfo, 3) || TaskInfo <- TailList]
-                    end,
-                    compare_dispatch(OtherNodes, GroupSize, TailList, TaskInfoList);
-                false ->
-                    compare_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
-            end
-    end.
+%%subtract_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
+%%    TaskModule = ?TASK_MODULE,
+%%    [FirstNode | OtherNodes] = RunningNodes,
+%%    case proplists:get_value(FirstNode, TaskInfoList) of
+%%        undefined ->
+%%            {HeadList, TailList} = lists:split(GroupSize, StopRunningTasks),
+%%            compare_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
+%%        VList ->
+%%            DiffValue = GroupSize - length(VList),
+%%            case DiffValue > 0 of
+%%                true ->
+%%                    {HeadList, TailList} = lists:split(DiffValue, StopRunningTasks),
+%%                    case FirstNode == node() of
+%%                        true ->
+%%                            %本节点任务
+%%                            local_task(TaskModule, task_notice, HeadList);
+%%                        false ->
+%%                            [remote_task(FirstNode, TaskModule, task_notice, TaskInfo, 3) || TaskInfo <- TailList]
+%%                    end,
+%%                    compare_dispatch(OtherNodes, GroupSize, TailList, TaskInfoList);
+%%                false ->
+%%                    compare_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
+%%            end
+%%    end.
 
 %删除节点的任务记录
 node_task_clean(Nodes, TaskInfo) ->
@@ -428,35 +427,35 @@ group_task(GroupSize, TaskList, GroupList) ->
     {FirstList, RemainList} = lists:split(GroupSize, TaskList),
     group_task(GroupSize, RemainList, GroupList ++ [FirstList]).
 
-query_already_dispatch_task(Node) ->
-    case mdirty_read(dispatch_task, Node) of
-        {error, empty} ->
-            {ok, []};
-        {ok, Tasks} ->
-            {ok, Tasks};
-        Error ->
-            {error, Error}
-    end.
-
-query_already_dispatch_node() ->
-    case mdirty_read(dispatch_node, node) of
-        {error, empty} ->
-            {ok, []};
-        {ok, Nodes} ->
-            {ok, Nodes};
-        Error ->
-            {error, Error}
-    end.
-
-compare_already_dispatch_node() ->
-    {ok, TaskInfo} = mquery(dispatch_task),
-    DispatchNode = lists:foldl(fun(T, Acc) ->  {Node, _Tasks} = T, [Node] ++ Acc end, [], TaskInfo),
-    ok = mwrite(dispatch_node, node, DispatchNode).
-
-query_dispatch() ->
-    {ok, TaskInfo} = mquery(dispatch_task),
-    lists:foldl(fun(T, Acc) ->
-        {Node, Tasks} = T, {Ns, Ts} = Acc, {[Node] ++ Ns, Tasks ++ Ts} end, {[], []}, TaskInfo).
+%%query_already_dispatch_task(Node) ->
+%%    case mdirty_read(dispatch_task, Node) of
+%%        {error, empty} ->
+%%            {ok, []};
+%%        {ok, Tasks} ->
+%%            {ok, Tasks};
+%%        Error ->
+%%            {error, Error}
+%%    end.
+%%
+%%query_already_dispatch_node() ->
+%%    case mdirty_read(dispatch_node, node) of
+%%        {error, empty} ->
+%%            {ok, []};
+%%        {ok, Nodes} ->
+%%            {ok, Nodes};
+%%        Error ->
+%%            {error, Error}
+%%    end.
+%%
+%%compare_already_dispatch_node() ->
+%%    {ok, TaskInfo} = mquery(dispatch_task),
+%%    DispatchNode = lists:foldl(fun(T, Acc) ->  {Node, _Tasks} = T, [Node] ++ Acc end, [], TaskInfo),
+%%    ok = mwrite(dispatch_node, node, DispatchNode).
+%%
+%%query_dispatch() ->
+%%    {ok, TaskInfo} = mquery(dispatch_task),
+%%    lists:foldl(fun(T, Acc) ->
+%%        {Node, Tasks} = T, {Ns, Ts} = Acc, {[Node] ++ Ns, Tasks ++ Ts} end, {[], []}, TaskInfo).
 
 
 
