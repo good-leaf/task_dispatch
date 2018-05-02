@@ -1,0 +1,7 @@
+-name task_dispatch@127.0.0.1
+-setcookie task_dispatch
+-heart
++P 1000000
++K true
++e 84000
+-mnesia dir '"/opt/meituan/apps/logs/task_dispatch/mnesia/"'
