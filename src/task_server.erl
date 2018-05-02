@@ -256,7 +256,12 @@ check_change() ->
 dispatch_task(RunningNode, [], _TaskInfo) ->
     TaskModule = ?TASK_MODULE,
     TaskList = TaskModule:task_list(),
-    GroupSize = length(TaskList) div length(RunningNode) + 1,
+    GroupSize = case length(RunningNode) == 1 of
+                    true ->
+                        length(TaskList) div length(RunningNode);
+                    false ->
+                        length(TaskList) div length(RunningNode) + 1
+                end,
     GroupList = group_task(GroupSize, TaskList, []),
 
     lists:zipwith(fun(Node, Tasks) ->
@@ -282,7 +287,12 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
     %未运行任务列表
     TaskModule = ?TASK_MODULE,
     TaskList = TaskModule:task_list(),
-    GroupSize = length(TaskList) div length(RunningNode) + 1,
+    GroupSize = case length(RunningNode) == 1 of
+                    true ->
+                        length(TaskList) div length(RunningNode);
+                    false ->
+                        length(TaskList) div length(RunningNode) + 1
+                end,
     %停止节点的任务列表 + 之前分配没有功能的任务列表
     StopRunningTasks = TaskList -- node_task_list(LastDispatchNodes -- StopRunningNodes, TaskInfo),
 
@@ -394,7 +404,7 @@ local_task(TaskModule, Function, TaskList) ->
                 %设置节点任务信息
                 case Function of
                     task_notice ->
-                        mwrite(dispatch_task, {task_id(TaskInfo), node(), TaskInfo});
+                        mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), node(), TaskInfo});
                     task_cancel ->
                         mdelete(dispatch_task, task_id(TaskInfo))
                 end;
@@ -418,6 +428,13 @@ remote_task(Node, Module, Function, Args, Retry) ->
         ok ->
             error_logger:info_msg("rpc node:~p, module:~p, function:~p, args:~p success, response:~p",
                 [Node, Module, Function, Args, ok]),
+            %设置节点任务信息
+            case Function of
+                task_notice ->
+                    mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args});
+                task_cancel ->
+                    mdelete(dispatch_task, task_id(Args))
+            end,
             ok
     end.
 
