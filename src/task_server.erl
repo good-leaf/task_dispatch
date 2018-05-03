@@ -37,7 +37,6 @@
 
 
 -define(SERVER, ?MODULE).
--define(CHECK_INTERVAL, 1000).
 -record(state, {}).
 
 %%%===================================================================
@@ -136,7 +135,7 @@ handle_info(check, State) ->
     false ->
       ok
   end,
-  erlang:send_after(?CHECK_INTERVAL, self(), check),
+  erlang:send_after(?CHECK_TIME, self(), check),
   {noreply, State};
 handle_info(_Info, State) ->
   {noreply, State}.
@@ -174,6 +173,231 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+%各节点所属的任务，由节点自己保证任务的正常运行
+%任务迁移时，先取消占用，才能再分配
+check_change() ->
+  RunningNode = mnesia_node(running),
+  {ok, TaskInfo} = mquery(dispatch_task),
+  LastDispatchNodes = lists:foldl(fun(T, Acc) ->
+    {_Table, _Id, Node, _Task} = T,
+    case lists:member(Node, Acc) of
+      true ->
+        Acc;
+      false ->
+        Acc ++ [Node]
+    end end, [], TaskInfo),
+
+  RunningTaskSize = length(TaskInfo),
+  TaskModule = ?TASK_MODULE,
+  TaskSize = length(TaskModule:task_list()),
+  %节点数变更
+  case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) andalso TaskSize == RunningTaskSize of
+    true ->
+      ignore;
+    false ->
+      dispatch_task(RunningNode, LastDispatchNodes, TaskInfo)
+  end.
+
+%不存在已经分配的任务时，任务平均分配到各个运行节点
+dispatch_task(RunningNode, [], _TaskInfo) ->
+  TaskModule = ?TASK_MODULE,
+  TaskList = TaskModule:task_list(),
+  GroupSize = case length(RunningNode) == 1 of
+                true ->
+                  length(TaskList) div length(RunningNode);
+                false ->
+                  case length(TaskList) rem 2 == 0 of
+                    true ->
+                      length(TaskList) div length(RunningNode);
+                    false ->
+                      length(TaskList) div length(RunningNode) + 1
+                  end
+              end,
+  GroupList = group_task(GroupSize, TaskList, []),
+
+  lists:zipwith(fun(Node, Tasks) -> task_cmd(Node, Tasks, task_notice) end, RunningNode, GroupList);
+
+%任务按照最少迁移原则重新分配
+dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
+  TaskInfoList = convert_list(TaskInfo),
+  %新启动的节点
+  NeedDispatchNodes = RunningNode -- LastDispatchNodes,
+
+  %未运行的节点
+  StopRunningNodes = LastDispatchNodes -- RunningNode,
+  %删除未运行节点的任务记录
+  node_task_clean(StopRunningNodes, TaskInfo),
+
+  %未运行任务列表
+  TaskModule = ?TASK_MODULE,
+  TaskList = TaskModule:task_list(),
+  GroupSize = case length(RunningNode) == 1 of
+                true ->
+                  length(TaskList) div length(RunningNode);
+                false ->
+                  case length(TaskList) rem 2 == 0 of
+                    true ->
+                      length(TaskList) div length(RunningNode);
+                    false ->
+                      length(TaskList) div length(RunningNode) + 1
+                  end
+              end,
+  %停止节点的任务列表 + 之前分配没有功能的任务列表
+  StopRunningTasks = TaskList -- node_task_list(LastDispatchNodes -- StopRunningNodes, TaskInfo),
+
+  case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) of
+    true ->
+      %节点未变更，存在未分配成功的任务
+      add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
+    false ->
+      %节点有变更
+      case NeedDispatchNodes == [] of
+        true ->
+          %节点数变小
+          add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
+        false ->
+          %节点数变大
+          subtract_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList)
+      end
+  end.
+
+convert_list(TaskInfo) ->
+  lists:foldl(fun(T, Acc) ->
+    {_Table, _Id, Node, Task} = T,
+    case proplists:get_value(Node, Acc) of
+      undefined ->
+        Acc ++ [{Node, [Task]}];
+      ValueList ->
+        lists:keyreplace(Node, 1, Acc, {Node, ValueList ++ [Task]})
+    end end, [], TaskInfo).
+
+add_dispatch(_RunningNodes, _GroupSize, [], _TaskInfoList) ->
+  ok;
+add_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
+  [FirstNode | OtherNodes] = RunningNodes,
+  case proplists:get_value(FirstNode, TaskInfoList) of
+    undefined ->
+      error_logger:error_msg("exception exist !!!!!!"),
+      add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
+    VList ->
+      DiffValue = GroupSize - length(VList),
+      case DiffValue > 0 of
+        true ->
+          {HeadList, TailList} = lists:split(DiffValue, StopRunningTasks),
+          task_cmd(FirstNode, HeadList, task_notice),
+          add_dispatch(OtherNodes, GroupSize, TailList, TaskInfoList);
+        false ->
+          add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
+      end
+  end.
+subtract_dispatch([], _GroupSize, _StopRunningTasks, _TaskInfoList) ->
+  ok;
+subtract_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
+  [FirstNode | OtherNodes] = RunningNodes,
+  case proplists:get_value(FirstNode, TaskInfoList) of
+    undefined ->
+      %新启动的节点
+      RemainStopRunningTasks = case GroupSize > length(StopRunningTasks) of
+                                 true ->
+                                   task_cmd(FirstNode, StopRunningTasks, task_notice),
+                                   [];
+                                 false ->
+                                   {HeadList, TailList} = lists:split(GroupSize, StopRunningTasks),
+                                   task_cmd(FirstNode, HeadList, task_notice),
+                                   TailList
+                               end,
+      subtract_dispatch(OtherNodes, GroupSize, RemainStopRunningTasks, TaskInfoList);
+    VList ->
+      DiffValue = length(VList) - GroupSize,
+      case DiffValue > 0 of
+        true ->
+          {HeadList, _TailList} = lists:split(DiffValue, VList),
+          task_cmd(FirstNode, HeadList, task_cancel),
+          subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
+        false ->
+          subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
+      end
+  end.
+
+task_cmd(NoticeNode, TaskList, Cmd) ->
+  case NoticeNode == node() of
+    true ->
+      %本节点任务
+      local_task(?TASK_MODULE, Cmd, TaskList);
+    false ->
+      [remote_task(NoticeNode, ?TASK_MODULE, Cmd, TaskInfo, ?Retry) || TaskInfo <- TaskList]
+  end.
+
+%删除节点的任务记录
+node_task_clean(Nodes, TaskInfo) ->
+  lists:foreach(fun(T) ->
+    {_Table, Id, Node, _Task} = T,
+    case lists:member(Node, Nodes) of
+      true ->
+        ensure_mdelete(dispatch_task, Id, ?Retry);
+      false ->
+        ignore
+    end end, TaskInfo).
+
+%节点运行任务列表
+node_task_list(Nodes, TaskInfo) ->
+  lists:foldl(fun(T, Acc) ->
+    {_Table, _Id, Node, Task} = T,
+    case lists:member(Node, Nodes) of
+      true ->
+        Acc ++ [Task];
+      false ->
+        Acc
+    end end, [], TaskInfo).
+
+local_task(TaskModule, Function, TaskList) ->
+  TaskModule = ?TASK_MODULE,
+  Fun = fun(TaskInfo) ->
+    case TaskModule:Function(TaskInfo) of
+      ok ->
+        %设置节点任务信息
+        case Function of
+          task_notice ->
+             ensure_mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), node(), TaskInfo}, ?Retry);
+          task_cancel ->
+             ensure_mdelete(dispatch_task, task_id(TaskInfo),  ?Retry)
+        end;
+      error ->
+        ignore
+    end
+  end,
+  [Fun(TaskInfo) || TaskInfo <- TaskList].
+
+task_id(TaskInfo) ->
+  erlang:md5(term_to_binary(TaskInfo)).
+
+remote_task(_Node, _Module, _Function, _Args, 0) ->
+  error;
+remote_task(Node, Module, Function, Args, Retry) ->
+  case rpc:call(Node, Module, Function, Args, ?NODE_TIMEOUT) of
+    {badrpc, Reason} ->
+      error_logger:error_msg("rpc node:~p, module:~p, function:~p, args:~p failed, reason:~p",
+        [Node, Module, Function, Args, Reason]),
+      remote_task(Node, Module, Function, Args, Retry - 1);
+    ok ->
+      error_logger:info_msg("rpc node:~p, module:~p, function:~p, args:~p success",
+        [Node, Module, Function, Args]),
+      %设置节点任务信息
+      case Function of
+        task_notice ->
+          ensure_mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args},  ?Retry);
+        task_cancel ->
+          ensure_mdelete(dispatch_task, task_id(Args), ?Retry)
+      end,
+      ok
+  end.
+
+group_task(_GroupSize, [], GroupList) ->
+  GroupList;
+group_task(GroupSize, TaskList, GroupList) ->
+  {FirstList, RemainList} = lists:split(GroupSize, TaskList),
+  group_task(GroupSize, RemainList, GroupList ++ [FirstList]).
+
 mwrite(Table, Record) ->
   F = fun() ->
     mnesia:write(Record)
@@ -253,255 +477,6 @@ mnesia_node(stop) ->
   AllNodes = mnesia:system_info(db_nodes),
   RunningNodes = mnesia:system_info(running_db_nodes),
   AllNodes -- RunningNodes.
-
-%各节点所属的任务，由节点自己保证任务的正常运行
-%任务迁移时，先取消占用，才能再分配
-check_change() ->
-  RunningNode = mnesia_node(running),
-  {ok, TaskInfo} = mquery(dispatch_task),
-  LastDispatchNodes = lists:foldl(fun(T, Acc) ->
-    {_Table, _Id, Node, _Task} = T,
-    case lists:member(Node, Acc) of
-      true ->
-        Acc;
-      false ->
-        Acc ++ [Node]
-    end end, [], TaskInfo),
-
-  RunningTaskSize = length(TaskInfo),
-  TaskModule = ?TASK_MODULE,
-  TaskSize = length(TaskModule:task_list()),
-  %节点数变更
-  case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) andalso TaskSize == RunningTaskSize of
-    true ->
-      ignore;
-    false ->
-      dispatch_task(RunningNode, LastDispatchNodes, TaskInfo)
-  end.
-
-%不存在已经分配的任务时，任务平均分配到各个运行节点
-dispatch_task(RunningNode, [], _TaskInfo) ->
-  TaskModule = ?TASK_MODULE,
-  TaskList = TaskModule:task_list(),
-  GroupSize = case length(RunningNode) == 1 of
-                true ->
-                  length(TaskList) div length(RunningNode);
-                false ->
-                  case length(TaskList) rem 2 == 0 of
-                    true ->
-                      length(TaskList) div length(RunningNode);
-                    false ->
-                      length(TaskList) div length(RunningNode) + 1
-                  end
-              end,
-  GroupList = group_task(GroupSize, TaskList, []),
-
-  lists:zipwith(fun(Node, Tasks) ->
-    case Node == node() of
-      true ->
-        %本节点任务
-        local_task(TaskModule, task_notice, Tasks);
-      false ->
-        [remote_task(Node, TaskModule, task_notice, TaskInfo, 3) || TaskInfo <- Tasks]
-    end end, RunningNode, GroupList);
-
-%任务按照最少迁移原则重新分配
-dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
-  TaskInfoList = convert_list(TaskInfo),
-  %新启动的节点
-  NeedDispatchNodes = RunningNode -- LastDispatchNodes,
-
-  %未运行的节点
-  StopRunningNodes = LastDispatchNodes -- RunningNode,
-  %删除未运行节点的任务记录
-  node_task_clean(StopRunningNodes, TaskInfo),
-
-  %未运行任务列表
-  TaskModule = ?TASK_MODULE,
-  TaskList = TaskModule:task_list(),
-  GroupSize = case length(RunningNode) == 1 of
-                true ->
-                  length(TaskList) div length(RunningNode);
-                false ->
-                  case length(TaskList) rem 2 == 0 of
-                    true ->
-                      length(TaskList) div length(RunningNode);
-                    false ->
-                      length(TaskList) div length(RunningNode) + 1
-                  end
-              end,
-  %停止节点的任务列表 + 之前分配没有功能的任务列表
-  StopRunningTasks = TaskList -- node_task_list(LastDispatchNodes -- StopRunningNodes, TaskInfo),
-
-  case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) of
-    true ->
-      %节点未变更，存在未分配成功的任务
-      add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
-    false ->
-      %节点有变更
-      case NeedDispatchNodes == [] of
-        true ->
-          %节点数变小
-          add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
-        false ->
-          %节点数变大
-          subtract_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList)
-      end
-  end.
-
-convert_list(TaskInfo) ->
-  lists:foldl(fun(T, Acc) ->
-    {_Table, _Id, Node, Task} = T,
-    case proplists:get_value(Node, Acc) of
-      undefined ->
-        Acc ++ [{Node, [Task]}];
-      ValueList ->
-        lists:keyreplace(Node, 1, Acc, {Node, ValueList ++ [Task]})
-    end end, [], TaskInfo).
-
-add_dispatch(_RunningNodes, _GroupSize, [], _TaskInfoList) ->
-  ok;
-add_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
-  TaskModule = ?TASK_MODULE,
-  [FirstNode | OtherNodes] = RunningNodes,
-  case proplists:get_value(FirstNode, TaskInfoList) of
-    undefined ->
-      error_logger:error_msg("exception exist !!!!!!"),
-      add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
-    VList ->
-      DiffValue = GroupSize - length(VList),
-      case DiffValue > 0 of
-        true ->
-          {HeadList, TailList} = lists:split(DiffValue, StopRunningTasks),
-          case FirstNode == node() of
-            true ->
-              %本节点任务
-              local_task(TaskModule, task_notice, HeadList);
-            false ->
-              [remote_task(FirstNode, TaskModule, task_notice, TaskInfo, 3) || TaskInfo <- HeadList]
-          end,
-          add_dispatch(OtherNodes, GroupSize, TailList, TaskInfoList);
-        false ->
-          add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
-      end
-  end.
-subtract_dispatch([], _GroupSize, _StopRunningTasks, _TaskInfoList) ->
-  ok;
-subtract_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
-  TaskModule = ?TASK_MODULE,
-  [FirstNode | OtherNodes] = RunningNodes,
-  case proplists:get_value(FirstNode, TaskInfoList) of
-    undefined ->
-      %新启动的节点
-      RemainStopRunningTasks = case GroupSize > length(StopRunningTasks) of
-                                 true ->
-                                   case FirstNode == node() of
-                                     true ->
-                                       %本节点任务
-                                       local_task(TaskModule, task_notice, StopRunningTasks);
-                                     false ->
-                                       [remote_task(FirstNode, TaskModule, task_notice, TaskInfo, 3) || TaskInfo <- StopRunningTasks]
-                                   end,
-                                   [];
-                                 false ->
-                                   {HeadList, TailList} = lists:split(GroupSize, StopRunningTasks),
-                                   case FirstNode == node() of
-                                     true ->
-                                       %本节点任务
-                                       local_task(TaskModule, task_notice, HeadList);
-                                     false ->
-                                       [remote_task(FirstNode, TaskModule, task_notice, TaskInfo, 3) || TaskInfo <- HeadList]
-                                   end,
-                                   TailList
-                               end,
-      subtract_dispatch(OtherNodes, GroupSize, RemainStopRunningTasks, TaskInfoList);
-    VList ->
-      DiffValue = length(VList) - GroupSize,
-      case DiffValue > 0 of
-        true ->
-          {HeadList, _TailList} = lists:split(DiffValue, VList),
-          case FirstNode == node() of
-            true ->
-              %本节点任务
-              local_task(TaskModule, task_cancel, HeadList);
-            false ->
-              [remote_task(FirstNode, TaskModule, task_cancel, TaskInfo, 3) || TaskInfo <- HeadList]
-          end,
-          subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
-        false ->
-          subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
-      end
-  end.
-
-%删除节点的任务记录
-node_task_clean(Nodes, TaskInfo) ->
-  lists:foreach(fun(T) ->
-    {_Table, Id, Node, _Task} = T,
-    case lists:member(Node, Nodes) of
-      true ->
-        mdelete(dispatch_task, Id);
-      false ->
-        ignore
-    end end, TaskInfo).
-
-%节点运行任务列表
-node_task_list(Nodes, TaskInfo) ->
-  lists:foldl(fun(T, Acc) ->
-    {_Table, _Id, Node, Task} = T,
-    case lists:member(Node, Nodes) of
-      true ->
-        Acc ++ [Task];
-      false ->
-        Acc
-    end end, [], TaskInfo).
-
-local_task(TaskModule, Function, TaskList) ->
-  TaskModule = ?TASK_MODULE,
-  Fun = fun(TaskInfo) ->
-    case TaskModule:Function(TaskInfo) of
-      ok ->
-        %设置节点任务信息
-        case Function of
-          task_notice ->
-             ensure_mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), node(), TaskInfo}, 3);
-          task_cancel ->
-             ensure_mdelete(dispatch_task, task_id(TaskInfo), 3)
-        end;
-      error ->
-        ignore
-    end
-  end,
-  [Fun(TaskInfo) || TaskInfo <- TaskList].
-
-task_id(TaskInfo) ->
-  erlang:md5(term_to_binary(TaskInfo)).
-
-remote_task(_Node, _Module, _Function, _Args, 0) ->
-  error;
-remote_task(Node, Module, Function, Args, Retry) ->
-  case rpc:call(Node, Module, Function, Args, 10000) of
-    {badrpc, Reason} ->
-      error_logger:error_msg("rpc node:~p, module:~p, function:~p, args:~p failed, reason:~p",
-        [Node, Module, Function, Args, Reason]),
-      remote_task(Node, Module, Function, Args, Retry - 1);
-    ok ->
-      error_logger:info_msg("rpc node:~p, module:~p, function:~p, args:~p success",
-        [Node, Module, Function, Args]),
-      %设置节点任务信息
-      case Function of
-        task_notice ->
-          ensure_mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args}, 3);
-        task_cancel ->
-          ensure_mdelete(dispatch_task, task_id(Args), 3)
-      end,
-      ok
-  end.
-
-group_task(_GroupSize, [], GroupList) ->
-  GroupList;
-group_task(GroupSize, TaskList, GroupList) ->
-  {FirstList, RemainList} = lists:split(GroupSize, TaskList),
-  group_task(GroupSize, RemainList, GroupList ++ [FirstList]).
 
 %%query_already_dispatch_task(Node) ->
 %%    case mdirty_read(dispatch_task, Node) of
