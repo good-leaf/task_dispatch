@@ -8,7 +8,8 @@
 -define(WORKER(I), {I, {I, 'start_link', []}, 'permanent', 5 * ?MILLISECONDS_IN_SECOND, 'worker', [I]}).
 
 -define(CHILDREN, [
-	?WORKER('task_server')
+	?WORKER('task_server'),
+	?WORKER('task_test')
 ]).
 
 start_link() ->

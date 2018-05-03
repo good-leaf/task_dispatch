@@ -23,9 +23,9 @@
     code_change/3]).
 
 -export([
-    task_list/0,
-    task_notice/1,
-    task_cancel/1,
+    task_list/1,
+    task_notice/2,
+    task_cancel/2,
     mnesia_tables/0
 ]).
 
@@ -85,6 +85,23 @@ init([]) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
     {stop, Reason :: term(), NewState :: #state{}}).
+handle_call(task_list, _From, State) ->
+    %error_logger:info_msg("query task list, task"),
+    Tasks = [
+        [{name, task1}],
+        [{name, task2}],
+        [{name, task3}],
+        [{name, task4}],
+        [{name, task5}],
+        [{name, task6}]
+    ],
+    {reply, Tasks, State};
+handle_call({task_notice, TaskInfo}, _From, State) ->
+    error_logger:info_msg("recv task notice, task:~p", [TaskInfo]),
+    {reply, ok, State};
+handle_call({task_cancel, TaskInfo}, _From, State) ->
+    error_logger:info_msg("recv task cancel, task:~p", [TaskInfo]),
+    {reply, ok, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -171,21 +188,13 @@ mnesia_tables() ->
     ].
 
 %callback
-task_list() ->
-    [
-        [{name, task1}],
-        [{name, task2}],
-        [{name, task3}],
-        [{name, task4}],
-        [{name, task5}],
-        [{name, task6}]
-    ].
+task_list(TimeOut) ->
+    gen_server:call(?SERVER, task_list, TimeOut).
 
--spec task_notice(any()) -> ok | error.
-task_notice(TaskInfo) ->
-    error_logger:info_msg("recv task notice, task:~p", [TaskInfo]),
-    ok.
+-spec task_notice(any(), integer()) -> ok | error.
+task_notice(TaskInfo, TimeOut) ->
+    gen_server:call(?SERVER, {task_notice, TaskInfo}, TimeOut).
 
--spec task_cancel(any()) -> ok | error.
-task_cancel(TaskInfo) ->
-    error_logger:info_msg("recv task cancel, task:~p", [TaskInfo]).
+-spec task_cancel(any(), integer()) -> ok | error.
+task_cancel(TaskInfo, TimeOut) ->
+    gen_server:call(?SERVER, {task_cancel, TaskInfo}, TimeOut).

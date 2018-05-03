@@ -18,21 +18,21 @@
 
 %% gen_server callbacks
 -export([init/1,
-  handle_call/3,
-  handle_cast/2,
-  handle_info/2,
-  terminate/2,
-  code_change/3]).
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2,
+    terminate/2,
+    code_change/3]).
 
 %% API
 -export([
-  mwrite/2,
-  mquery/1,
-  mdirty_read/2,
-  mdelete/1,
-  mdelete/2,
+    mwrite/2,
+    mquery/1,
+    mdirty_read/2,
+    mdelete/1,
+    mdelete/2,
 
-  mnesia_node/1
+    mnesia_node/1
 ]).
 
 
@@ -50,9 +50,9 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec(start_link() ->
-  {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
+    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
-  gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -70,11 +70,11 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(init(Args :: term()) ->
-  {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
-  {stop, Reason :: term()} | ignore).
+    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term()} | ignore).
 init([]) ->
-  erlang:send_after(5000, self(), check),
-  {ok, #state{}}.
+    erlang:send_after(5000, self(), check),
+    {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -85,14 +85,14 @@ init([]) ->
 %%--------------------------------------------------------------------
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
     State :: #state{}) ->
-  {reply, Reply :: term(), NewState :: #state{}} |
-  {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-  {noreply, NewState :: #state{}} |
-  {noreply, NewState :: #state{}, timeout() | hibernate} |
-  {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-  {stop, Reason :: term(), NewState :: #state{}}).
+    {reply, Reply :: term(), NewState :: #state{}} |
+    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
+    {stop, Reason :: term(), NewState :: #state{}}).
 handle_call(_Request, _From, State) ->
-  {reply, ok, State}.
+    {reply, ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -102,11 +102,11 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(handle_cast(Request :: term(), State :: #state{}) ->
-  {noreply, NewState :: #state{}} |
-  {noreply, NewState :: #state{}, timeout() | hibernate} |
-  {stop, Reason :: term(), NewState :: #state{}}).
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast(_Request, State) ->
-  {noreply, State}.
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -119,26 +119,26 @@ handle_cast(_Request, State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(handle_info(Info :: timeout() | term(), State :: #state{}) ->
-  {noreply, NewState :: #state{}} |
-  {noreply, NewState :: #state{}, timeout() | hibernate} |
-  {stop, Reason :: term(), NewState :: #state{}}).
+    {noreply, NewState :: #state{}} |
+    {noreply, NewState :: #state{}, timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(check, State) ->
-  [FirstNode | _Node] = lists:sort(nodes() ++ [node()]),
-  case FirstNode == node() of
-    true ->
-      try
-        check_change()
-      catch
-          E:R  ->
-            error_logger:error_msg("check task change failed, error:~p, reason:~p", [E, R])
-      end;
-    false ->
-      ok
-  end,
-  erlang:send_after(?CHECK_TIME, self(), check),
-  {noreply, State};
+    [FirstNode | _Node] = lists:sort(nodes() ++ [node()]),
+    case FirstNode == node() of
+        true ->
+            try
+                check_change()
+            catch
+                E:R ->
+                    error_logger:error_msg("check task change failed, error:~p, reason:~p", [E, R])
+            end;
+        false ->
+            ok
+    end,
+    erlang:send_after(?CHECK_TIME, self(), check),
+    {noreply, State};
 handle_info(_Info, State) ->
-  {noreply, State}.
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -154,7 +154,7 @@ handle_info(_Info, State) ->
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #state{}) -> term()).
 terminate(_Reason, _State) ->
-  ok.
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -166,9 +166,9 @@ terminate(_Reason, _State) ->
 %%--------------------------------------------------------------------
 -spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
     Extra :: term()) ->
-  {ok, NewState :: #state{}} | {error, Reason :: term()}).
+    {ok, NewState :: #state{}} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
-  {ok, State}.
+    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
@@ -176,307 +176,307 @@ code_change(_OldVsn, State, _Extra) ->
 %各节点所属的任务，由节点自己保证任务的正常运行
 %任务迁移时，先取消占用，才能再分配
 check_change() ->
-  RunningNode = mnesia_node(running),
-  {ok, TaskInfo} = mquery(dispatch_task),
-  LastDispatchNodes = lists:foldl(fun(T, Acc) ->
-    {_Table, _Id, Node, _Task} = T,
-    case lists:member(Node, Acc) of
-      true ->
-        Acc;
-      false ->
-        Acc ++ [Node]
-    end end, [], TaskInfo),
+    RunningNode = mnesia_node(running),
+    {ok, TaskInfo} = mquery(dispatch_task),
+    LastDispatchNodes = lists:foldl(fun(T, Acc) ->
+        {_Table, _Id, Node, _Task} = T,
+        case lists:member(Node, Acc) of
+            true ->
+                Acc;
+            false ->
+                Acc ++ [Node]
+        end end, [], TaskInfo),
 
-  RunningTaskSize = length(TaskInfo),
-  TaskModule = ?TASK_MODULE,
-  TaskSize = length(TaskModule:task_list()),
-  %节点数变更
-  case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) andalso TaskSize == RunningTaskSize of
-    true ->
-      ignore;
-    false ->
-      dispatch_task(RunningNode, LastDispatchNodes, TaskInfo)
-  end.
+    RunningTaskSize = length(TaskInfo),
+    TaskModule = ?TASK_MODULE,
+    TaskSize = length(TaskModule:task_list(?NODE_TIMEOUT)),
+    %节点数变更
+    case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) andalso TaskSize == RunningTaskSize of
+        true ->
+            ignore;
+        false ->
+            dispatch_task(RunningNode, LastDispatchNodes, TaskInfo)
+    end.
 
 %不存在已经分配的任务时，任务平均分配到各个运行节点
 dispatch_task(RunningNode, [], _TaskInfo) ->
-  TaskModule = ?TASK_MODULE,
-  TaskList = TaskModule:task_list(),
-  GroupSize = case length(RunningNode) == 1 of
-                true ->
-                  length(TaskList) div length(RunningNode);
-                false ->
-                  case length(TaskList) rem 2 == 0 of
+    TaskModule = ?TASK_MODULE,
+    TaskList = TaskModule:task_list(?NODE_TIMEOUT),
+    GroupSize = case length(RunningNode) == 1 of
                     true ->
-                      length(TaskList) div length(RunningNode);
+                        length(TaskList) div length(RunningNode);
                     false ->
-                      length(TaskList) div length(RunningNode) + 1
-                  end
-              end,
-  GroupList = group_task(GroupSize, TaskList, []),
+                        case length(TaskList) rem 2 == 0 of
+                            true ->
+                                length(TaskList) div length(RunningNode);
+                            false ->
+                                length(TaskList) div length(RunningNode) + 1
+                        end
+                end,
+    GroupList = group_task(GroupSize, TaskList, []),
 
-  lists:zipwith(fun(Node, Tasks) -> task_cmd(Node, Tasks, task_notice) end, RunningNode, GroupList);
+    lists:zipwith(fun(Node, Tasks) -> task_cmd(Node, Tasks, task_notice) end, RunningNode, GroupList);
 
 %任务按照最少迁移原则重新分配
 dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
-  TaskInfoList = convert_list(TaskInfo),
-  %新启动的节点
-  NeedDispatchNodes = RunningNode -- LastDispatchNodes,
+    TaskInfoList = convert_list(TaskInfo),
+    %新启动的节点
+    NeedDispatchNodes = RunningNode -- LastDispatchNodes,
 
-  %未运行的节点
-  StopRunningNodes = LastDispatchNodes -- RunningNode,
-  %删除未运行节点的任务记录
-  node_task_clean(StopRunningNodes, TaskInfo),
+    %未运行的节点
+    StopRunningNodes = LastDispatchNodes -- RunningNode,
+    %删除未运行节点的任务记录
+    node_task_clean(StopRunningNodes, TaskInfo),
 
-  %未运行任务列表
-  TaskModule = ?TASK_MODULE,
-  TaskList = TaskModule:task_list(),
-  GroupSize = case length(RunningNode) == 1 of
-                true ->
-                  length(TaskList) div length(RunningNode);
-                false ->
-                  case length(TaskList) rem 2 == 0 of
+    %未运行任务列表
+    TaskModule = ?TASK_MODULE,
+    TaskList = TaskModule:task_list(?NODE_TIMEOUT),
+    GroupSize = case length(RunningNode) == 1 of
                     true ->
-                      length(TaskList) div length(RunningNode);
+                        length(TaskList) div length(RunningNode);
                     false ->
-                      length(TaskList) div length(RunningNode) + 1
-                  end
-              end,
-  %停止节点的任务列表 + 之前分配没有功能的任务列表
-  StopRunningTasks = TaskList -- node_task_list(LastDispatchNodes -- StopRunningNodes, TaskInfo),
+                        case length(TaskList) rem 2 == 0 of
+                            true ->
+                                length(TaskList) div length(RunningNode);
+                            false ->
+                                length(TaskList) div length(RunningNode) + 1
+                        end
+                end,
+    %停止节点的任务列表 + 之前分配没有功能的任务列表
+    StopRunningTasks = TaskList -- node_task_list(LastDispatchNodes -- StopRunningNodes, TaskInfo),
 
-  case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) of
-    true ->
-      %节点未变更，存在未分配成功的任务
-      add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
-    false ->
-      %节点有变更
-      case NeedDispatchNodes == [] of
+    case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) of
         true ->
-          %节点数变小
-          add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
+            %节点未变更，存在未分配成功的任务
+            add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
         false ->
-          %节点数变大
-          subtract_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList)
-      end
-  end.
+            %节点有变更
+            case NeedDispatchNodes == [] of
+                true ->
+                    %节点数变小
+                    add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
+                false ->
+                    %节点数变大
+                    subtract_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList)
+            end
+    end.
 
 convert_list(TaskInfo) ->
-  lists:foldl(fun(T, Acc) ->
-    {_Table, _Id, Node, Task} = T,
-    case proplists:get_value(Node, Acc) of
-      undefined ->
-        Acc ++ [{Node, [Task]}];
-      ValueList ->
-        lists:keyreplace(Node, 1, Acc, {Node, ValueList ++ [Task]})
-    end end, [], TaskInfo).
+    lists:foldl(fun(T, Acc) ->
+        {_Table, _Id, Node, Task} = T,
+        case proplists:get_value(Node, Acc) of
+            undefined ->
+                Acc ++ [{Node, [Task]}];
+            ValueList ->
+                lists:keyreplace(Node, 1, Acc, {Node, ValueList ++ [Task]})
+        end end, [], TaskInfo).
 
 add_dispatch(_RunningNodes, _GroupSize, [], _TaskInfoList) ->
-  ok;
+    ok;
 add_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
-  [FirstNode | OtherNodes] = RunningNodes,
-  case proplists:get_value(FirstNode, TaskInfoList) of
-    undefined ->
-      error_logger:error_msg("exception exist !!!!!!"),
-      add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
-    VList ->
-      DiffValue = GroupSize - length(VList),
-      case DiffValue > 0 of
-        true ->
-          {HeadList, TailList} = lists:split(DiffValue, StopRunningTasks),
-          task_cmd(FirstNode, HeadList, task_notice),
-          add_dispatch(OtherNodes, GroupSize, TailList, TaskInfoList);
-        false ->
-          add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
-      end
-  end.
+    [FirstNode | OtherNodes] = RunningNodes,
+    case proplists:get_value(FirstNode, TaskInfoList) of
+        undefined ->
+            error_logger:error_msg("exception exist !!!!!!"),
+            add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
+        VList ->
+            DiffValue = GroupSize - length(VList),
+            case DiffValue > 0 of
+                true ->
+                    {HeadList, TailList} = lists:split(DiffValue, StopRunningTasks),
+                    task_cmd(FirstNode, HeadList, task_notice),
+                    add_dispatch(OtherNodes, GroupSize, TailList, TaskInfoList);
+                false ->
+                    add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
+            end
+    end.
 subtract_dispatch([], _GroupSize, _StopRunningTasks, _TaskInfoList) ->
-  ok;
+    ok;
 subtract_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
-  [FirstNode | OtherNodes] = RunningNodes,
-  case proplists:get_value(FirstNode, TaskInfoList) of
-    undefined ->
-      %新启动的节点
-      RemainStopRunningTasks = case GroupSize > length(StopRunningTasks) of
-                                 true ->
-                                   task_cmd(FirstNode, StopRunningTasks, task_notice),
-                                   [];
-                                 false ->
-                                   {HeadList, TailList} = lists:split(GroupSize, StopRunningTasks),
-                                   task_cmd(FirstNode, HeadList, task_notice),
-                                   TailList
-                               end,
-      subtract_dispatch(OtherNodes, GroupSize, RemainStopRunningTasks, TaskInfoList);
-    VList ->
-      DiffValue = length(VList) - GroupSize,
-      case DiffValue > 0 of
-        true ->
-          {HeadList, _TailList} = lists:split(DiffValue, VList),
-          task_cmd(FirstNode, HeadList, task_cancel),
-          subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
-        false ->
-          subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
-      end
-  end.
+    [FirstNode | OtherNodes] = RunningNodes,
+    case proplists:get_value(FirstNode, TaskInfoList) of
+        undefined ->
+            %新启动的节点
+            RemainStopRunningTasks = case GroupSize > length(StopRunningTasks) of
+                                         true ->
+                                             task_cmd(FirstNode, StopRunningTasks, task_notice),
+                                             [];
+                                         false ->
+                                             {HeadList, TailList} = lists:split(GroupSize, StopRunningTasks),
+                                             task_cmd(FirstNode, HeadList, task_notice),
+                                             TailList
+                                     end,
+            subtract_dispatch(OtherNodes, GroupSize, RemainStopRunningTasks, TaskInfoList);
+        VList ->
+            DiffValue = length(VList) - GroupSize,
+            case DiffValue > 0 of
+                true ->
+                    {HeadList, _TailList} = lists:split(DiffValue, VList),
+                    task_cmd(FirstNode, HeadList, task_cancel),
+                    subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList);
+                false ->
+                    subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
+            end
+    end.
 
 task_cmd(NoticeNode, TaskList, Cmd) ->
-  case NoticeNode == node() of
-    true ->
-      %本节点任务
-      local_task(?TASK_MODULE, Cmd, TaskList);
-    false ->
-      [remote_task(NoticeNode, ?TASK_MODULE, Cmd, TaskInfo, ?Retry) || TaskInfo <- TaskList]
-  end.
+    case NoticeNode == node() of
+        true ->
+            %本节点任务
+            local_task(?TASK_MODULE, Cmd, TaskList);
+        false ->
+            [remote_task(NoticeNode, ?TASK_MODULE, Cmd, [TaskInfo, ?NODE_TIMEOUT], ?Retry) || TaskInfo <- TaskList]
+    end.
 
 %删除节点的任务记录
 node_task_clean(Nodes, TaskInfo) ->
-  lists:foreach(fun(T) ->
-    {_Table, Id, Node, _Task} = T,
-    case lists:member(Node, Nodes) of
-      true ->
-        ensure_mdelete(dispatch_task, Id, ?Retry);
-      false ->
-        ignore
-    end end, TaskInfo).
+    lists:foreach(fun(T) ->
+        {_Table, Id, Node, _Task} = T,
+        case lists:member(Node, Nodes) of
+            true ->
+                ensure_mdelete(dispatch_task, Id, ?Retry);
+            false ->
+                ignore
+        end end, TaskInfo).
 
 %节点运行任务列表
 node_task_list(Nodes, TaskInfo) ->
-  lists:foldl(fun(T, Acc) ->
-    {_Table, _Id, Node, Task} = T,
-    case lists:member(Node, Nodes) of
-      true ->
-        Acc ++ [Task];
-      false ->
-        Acc
-    end end, [], TaskInfo).
+    lists:foldl(fun(T, Acc) ->
+        {_Table, _Id, Node, Task} = T,
+        case lists:member(Node, Nodes) of
+            true ->
+                Acc ++ [Task];
+            false ->
+                Acc
+        end end, [], TaskInfo).
 
 local_task(TaskModule, Function, TaskList) ->
-  TaskModule = ?TASK_MODULE,
-  Fun = fun(TaskInfo) ->
-    case TaskModule:Function(TaskInfo) of
-      ok ->
-        %设置节点任务信息
-        case Function of
-          task_notice ->
-             ensure_mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), node(), TaskInfo}, ?Retry);
-          task_cancel ->
-             ensure_mdelete(dispatch_task, task_id(TaskInfo),  ?Retry)
-        end;
-      error ->
-        ignore
-    end
-  end,
-  [Fun(TaskInfo) || TaskInfo <- TaskList].
+    TaskModule = ?TASK_MODULE,
+    Fun = fun(TaskInfo) ->
+        case TaskModule:Function(TaskInfo, ?NODE_TIMEOUT) of
+            ok ->
+                %设置节点任务信息
+                case Function of
+                    task_notice ->
+                        ensure_mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), node(), TaskInfo}, ?Retry);
+                    task_cancel ->
+                        ensure_mdelete(dispatch_task, task_id(TaskInfo), ?Retry)
+                end;
+            error ->
+                ignore
+        end
+          end,
+    [Fun(TaskInfo) || TaskInfo <- TaskList].
 
 task_id(TaskInfo) ->
-  erlang:md5(term_to_binary(TaskInfo)).
+    erlang:md5(term_to_binary(TaskInfo)).
 
 remote_task(_Node, _Module, _Function, _Args, 0) ->
-  error;
+    error;
 remote_task(Node, Module, Function, Args, Retry) ->
-  case rpc:call(Node, Module, Function, Args, ?NODE_TIMEOUT) of
-    {badrpc, Reason} ->
-      error_logger:error_msg("rpc node:~p, module:~p, function:~p, args:~p failed, reason:~p",
-        [Node, Module, Function, Args, Reason]),
-      remote_task(Node, Module, Function, Args, Retry - 1);
-    ok ->
-      error_logger:info_msg("rpc node:~p, module:~p, function:~p, args:~p success",
-        [Node, Module, Function, Args]),
-      %设置节点任务信息
-      case Function of
-        task_notice ->
-          ensure_mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args},  ?Retry);
-        task_cancel ->
-          ensure_mdelete(dispatch_task, task_id(Args), ?Retry)
-      end,
-      ok
-  end.
+    case rpc:call(Node, Module, Function, Args, ?NODE_TIMEOUT) of
+        {badrpc, Reason} ->
+            error_logger:error_msg("rpc node:~p, module:~p, function:~p, args:~p failed, reason:~p",
+                [Node, Module, Function, Args, Reason]),
+            remote_task(Node, Module, Function, Args, Retry - 1);
+        ok ->
+            error_logger:info_msg("rpc node:~p, module:~p, function:~p, args:~p success",
+                [Node, Module, Function, Args]),
+            %设置节点任务信息
+            case Function of
+                task_notice ->
+                    ensure_mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args}, ?Retry);
+                task_cancel ->
+                    ensure_mdelete(dispatch_task, task_id(Args), ?Retry)
+            end,
+            ok
+    end.
 
 group_task(_GroupSize, [], GroupList) ->
-  GroupList;
+    GroupList;
 group_task(GroupSize, TaskList, GroupList) ->
-  {FirstList, RemainList} = lists:split(GroupSize, TaskList),
-  group_task(GroupSize, RemainList, GroupList ++ [FirstList]).
+    {FirstList, RemainList} = lists:split(GroupSize, TaskList),
+    group_task(GroupSize, RemainList, GroupList ++ [FirstList]).
 
 mwrite(Table, Record) ->
-  F = fun() ->
-    mnesia:write(Record)
-  end,
-  case mnesia:transaction(F) of
-    {atomic, _R} ->
-      error_logger:info_msg("mnesia save table:~p, record:~p", [Table, Record]),
-      ok;
-    {aborted, Reason} ->
-      error_logger:error_msg("mnesia save error:~p, table:~p, record:~p", [Reason, Table, Record]),
-      error
-  end.
+    F = fun() ->
+        mnesia:write(Record)
+        end,
+    case mnesia:transaction(F) of
+        {atomic, _R} ->
+            error_logger:info_msg("mnesia save table:~p, record:~p", [Table, Record]),
+            ok;
+        {aborted, Reason} ->
+            error_logger:error_msg("mnesia save error:~p, table:~p, record:~p", [Reason, Table, Record]),
+            error
+    end.
 
 ensure_mwrite(_Table, _Record, 0) ->
-  ok;
+    ok;
 ensure_mwrite(Table, Record, Retry) ->
-  case mwrite(Table, Record) of
-    ok ->
-      ok;
-    error ->
-      ensure_mwrite(Table, Record, Retry - 1)
-  end.
+    case mwrite(Table, Record) of
+        ok ->
+            ok;
+        error ->
+            ensure_mwrite(Table, Record, Retry - 1)
+    end.
 
 mquery(Table) ->
-  F = fun() ->
-    Q = qlc:q([E || E <- mnesia:table(Table)]),
-    qlc:e(Q)
-  end,
-  case mnesia:transaction(F) of
-    {atomic, List} ->
-      {ok, List};
-    {aborted, Reason} ->
-      error_logger:error_msg("mnesia query error:~p, table:~p", [Reason, Table]),
-      {error, Reason}
-  end.
+    F = fun() ->
+        Q = qlc:q([E || E <- mnesia:table(Table)]),
+        qlc:e(Q)
+        end,
+    case mnesia:transaction(F) of
+        {atomic, List} ->
+            {ok, List};
+        {aborted, Reason} ->
+            error_logger:error_msg("mnesia query error:~p, table:~p", [Reason, Table]),
+            {error, Reason}
+    end.
 
 mdelete(Table, Key) ->
-  F = fun() ->
-    mnesia:delete({Table, Key})
-  end,
-  case mnesia:transaction(F) of
-    {atomic, _R} ->
-      error_logger:info_msg("mnesia delete table:~p, key:~p", [Table, Key]),
-      ok;
-    {aborted, Reason} ->
-      error_logger:error_msg("mnesia delete table:~p, key:~p failed, reason:~p", [Table, Key, Reason]),
-      error
-  end.
+    F = fun() ->
+        mnesia:delete({Table, Key})
+        end,
+    case mnesia:transaction(F) of
+        {atomic, _R} ->
+            error_logger:info_msg("mnesia delete table:~p, key:~p", [Table, Key]),
+            ok;
+        {aborted, Reason} ->
+            error_logger:error_msg("mnesia delete table:~p, key:~p failed, reason:~p", [Table, Key, Reason]),
+            error
+    end.
 
 ensure_mdelete(_Table, _Key, 0) ->
-  ok;
+    ok;
 ensure_mdelete(Table, Key, Retry) ->
-  case mdelete(Table, Key) of
-    ok ->
-      ok;
-    error ->
-      ensure_mdelete(Table, Key, Retry - 1)
-  end.
+    case mdelete(Table, Key) of
+        ok ->
+            ok;
+        error ->
+            ensure_mdelete(Table, Key, Retry - 1)
+    end.
 
 mdelete(Table) ->
-  {ok, List} = mquery(Table),
-  [mdelete(Table, Key) || {_Table, Key, _Value} <- List].
+    {ok, List} = mquery(Table),
+    [mdelete(Table, Key) || {_Table, Key, _Value} <- List].
 
 mdirty_read(Table, Key) ->
-  case mnesia:dirty_read({Table, Key}) of
-    [] ->
-      {error, empty};
-    [{Table, Key, Cfg}] ->
-      {ok, Cfg};
-    Error ->
-      {error, Error}
-  end.
+    case mnesia:dirty_read({Table, Key}) of
+        [] ->
+            {error, empty};
+        [{Table, Key, Cfg}] ->
+            {ok, Cfg};
+        Error ->
+            {error, Error}
+    end.
 
 mnesia_node(running) ->
-  mnesia:system_info(running_db_nodes);
+    mnesia:system_info(running_db_nodes);
 mnesia_node(stop) ->
-  AllNodes = mnesia:system_info(db_nodes),
-  RunningNodes = mnesia:system_info(running_db_nodes),
-  AllNodes -- RunningNodes.
+    AllNodes = mnesia:system_info(db_nodes),
+    RunningNodes = mnesia:system_info(running_db_nodes),
+    AllNodes -- RunningNodes.
 
 %%query_already_dispatch_task(Node) ->
 %%    case mdirty_read(dispatch_task, Node) of
