@@ -130,7 +130,8 @@ handle_info(check, State) ->
                 check_change()
             catch
                 E:R ->
-                    error_logger:error_msg("check task change failed, error:~p, reason:~p", [E, R])
+                    error_logger:error_msg("check task change failed, error:~p, reason:~p, st:~p",
+                        [E, R, erlang:get_stacktrace()])
             end;
         false ->
             ok
@@ -225,6 +226,10 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
 
     %未运行的节点
     StopRunningNodes = LastDispatchNodes -- RunningNode,
+
+    error_logger:info_msg("running_nodes:~p, last_dispatch_nodes:~p need_dispatch_nodes:~p,
+    stop_running_nodes:~p",[RunningNode, LastDispatchNodes, NeedDispatchNodes, StopRunningNodes]),
+
     %删除未运行节点的任务记录
     node_task_clean(StopRunningNodes, TaskInfo),
 
@@ -243,8 +248,12 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
                         end
                 end,
     %停止节点的任务列表 + 之前分配没有功能的任务列表
-    StopRunningTasks = TaskList -- node_task_list(LastDispatchNodes -- StopRunningNodes, TaskInfo),
+    NormalNodes = LastDispatchNodes -- StopRunningNodes,
+    StopRunningTasks = TaskList -- lists:foldl(fun(NormalNode, Acc) ->
+        Acc ++ proplists:get_value(NormalNode, TaskInfoList, []) end, [], NormalNodes),
 
+    error_logger:info_msg("normal_nodes:~p, group_size:~p, stop_running_tasks:~p, convert_table:~p", [
+        NormalNodes, GroupSize, StopRunningTasks, TaskInfoList]),
     case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) of
         true ->
             %节点未变更，存在未分配成功的任务
@@ -254,9 +263,11 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
             case NeedDispatchNodes == [] of
                 true ->
                     %节点数变小
+                    error_logger:info_msg("add_dispatch"),
                     add_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList);
                 false ->
                     %节点数变大
+                    error_logger:info_msg("subtract_dispatch"),
                     subtract_dispatch(RunningNode, GroupSize, StopRunningTasks, TaskInfoList)
             end
     end.
@@ -272,6 +283,8 @@ convert_list(TaskInfo) ->
         end end, [], TaskInfo).
 
 add_dispatch(_RunningNodes, _GroupSize, [], _TaskInfoList) ->
+    ok;
+add_dispatch([], _GroupSize, _StopRunningTasks, _TaskInfoList) ->
     ok;
 add_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
     [FirstNode | OtherNodes] = RunningNodes,
@@ -290,6 +303,7 @@ add_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
                     add_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
             end
     end.
+
 subtract_dispatch([], _GroupSize, _StopRunningTasks, _TaskInfoList) ->
     ok;
 subtract_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
@@ -331,24 +345,14 @@ task_cmd(NoticeNode, TaskList, Cmd) ->
 %删除节点的任务记录
 node_task_clean(Nodes, TaskInfo) ->
     lists:foreach(fun(T) ->
-        {_Table, Id, Node, _Task} = T,
+        {_Table, Id, Node, Task} = T,
         case lists:member(Node, Nodes) of
             true ->
+                error_logger:info_msg("clean node task, node:~p, task:~p", [Node, Task]),
                 ensure_mdelete(dispatch_task, Id, ?Retry);
             false ->
                 ignore
         end end, TaskInfo).
-
-%节点运行任务列表
-node_task_list(Nodes, TaskInfo) ->
-    lists:foldl(fun(T, Acc) ->
-        {_Table, _Id, Node, Task} = T,
-        case lists:member(Node, Nodes) of
-            true ->
-                Acc ++ [Task];
-            false ->
-                Acc
-        end end, [], TaskInfo).
 
 local_task(TaskModule, Function, TaskList) ->
     TaskModule = ?TASK_MODULE,
@@ -374,6 +378,7 @@ task_id(TaskInfo) ->
 remote_task(_Node, _Module, _Function, _Args, 0) ->
     error;
 remote_task(Node, Module, Function, Args, Retry) ->
+    [TaskInfo, _TimeOut] = Args,
     case rpc:call(Node, Module, Function, Args, ?NODE_TIMEOUT) of
         {badrpc, Reason} ->
             error_logger:error_msg("rpc node:~p, module:~p, function:~p, args:~p failed, reason:~p",
@@ -385,9 +390,9 @@ remote_task(Node, Module, Function, Args, Retry) ->
             %设置节点任务信息
             case Function of
                 task_notice ->
-                    ensure_mwrite(dispatch_task, {dispatch_task, task_id(Args), node(), Args}, ?Retry);
+                    ensure_mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), Node, TaskInfo}, ?Retry);
                 task_cancel ->
-                    ensure_mdelete(dispatch_task, task_id(Args), ?Retry)
+                    ensure_mdelete(dispatch_task, task_id(TaskInfo), ?Retry)
             end,
             ok
     end.
