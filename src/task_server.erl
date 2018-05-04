@@ -31,10 +31,14 @@
     mdirty_read/2,
     mdelete/1,
     mdelete/2,
-
     mnesia_node/1
 ]).
 
+-export([
+    task_dispatch/0,
+    node_task_dispatch/0,
+    task_id/1
+]).
 
 -define(SERVER, ?MODULE).
 -record(state, {}).
@@ -190,7 +194,8 @@ check_change() ->
 
     RunningTaskSize = length(TaskInfo),
     TaskModule = ?TASK_MODULE,
-    TaskSize = length(TaskModule:task_list(?NODE_TIMEOUT)),
+    {ok, TaskList} = TaskModule:task_list(?NODE_TIMEOUT),
+    TaskSize = length(TaskList),
     %节点数变更
     case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) andalso TaskSize == RunningTaskSize of
         true ->
@@ -202,7 +207,7 @@ check_change() ->
 %不存在已经分配的任务时，任务平均分配到各个运行节点
 dispatch_task(RunningNode, [], _TaskInfo) ->
     TaskModule = ?TASK_MODULE,
-    TaskList = TaskModule:task_list(?NODE_TIMEOUT),
+    {ok, TaskList} = TaskModule:task_list(?NODE_TIMEOUT),
     GroupSize = case length(RunningNode) == 1 of
                     true ->
                         length(TaskList) div length(RunningNode);
@@ -235,7 +240,7 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
 
     %未运行任务列表
     TaskModule = ?TASK_MODULE,
-    TaskList = TaskModule:task_list(?NODE_TIMEOUT),
+    {ok, TaskList} = TaskModule:task_list(?NODE_TIMEOUT),
     GroupSize = case length(RunningNode) == 1 of
                     true ->
                         length(TaskList) div length(RunningNode);
@@ -373,7 +378,8 @@ local_task(TaskModule, Function, TaskList) ->
     [Fun(TaskInfo) || TaskInfo <- TaskList].
 
 task_id(TaskInfo) ->
-    erlang:md5(term_to_binary(TaskInfo)).
+    Sig = erlang:md5(term_to_binary(TaskInfo)),
+    iolist_to_binary([io_lib:format("~2.16.0b", [S]) || S <- binary_to_list(Sig)]).
 
 remote_task(_Node, _Module, _Function, _Args, 0) ->
     error;
@@ -483,35 +489,14 @@ mnesia_node(stop) ->
     RunningNodes = mnesia:system_info(running_db_nodes),
     AllNodes -- RunningNodes.
 
-%%query_already_dispatch_task(Node) ->
-%%    case mdirty_read(dispatch_task, Node) of
-%%        {error, empty} ->
-%%            {ok, []};
-%%        {ok, Tasks} ->
-%%            {ok, Tasks};
-%%        Error ->
-%%            {error, Error}
-%%    end.
-%%
-%%query_already_dispatch_node() ->
-%%    case mdirty_read(dispatch_node, node) of
-%%        {error, empty} ->
-%%            {ok, []};
-%%        {ok, Nodes} ->
-%%            {ok, Nodes};
-%%        Error ->
-%%            {error, Error}
-%%    end.
-%%
-%%compare_already_dispatch_node() ->
-%%    {ok, TaskInfo} = mquery(dispatch_task),
-%%    DispatchNode = lists:foldl(fun(T, Acc) ->  {Node, _Tasks} = T, [Node] ++ Acc end, [], TaskInfo),
-%%    ok = mwrite(dispatch_node, node, DispatchNode).
-%%
-%%query_dispatch() ->
-%%    {ok, TaskInfo} = mquery(dispatch_task),
-%%    lists:foldl(fun(T, Acc) ->
-%%        {Node, Tasks} = T, {Ns, Ts} = Acc, {[Node] ++ Ns, Tasks ++ Ts} end, {[], []}, TaskInfo).
+
+node_task_dispatch() ->
+    {ok, TaskInfo} = mquery(dispatch_task),
+    convert_list(TaskInfo).
+
+task_dispatch() ->
+    mquery(dispatch_task).
+
 
 
 

@@ -95,7 +95,7 @@ handle_call(task_list, _From, State) ->
         [{name, task5}],
         [{name, task6}]
     ],
-    {reply, Tasks, State};
+    {reply, {ok, Tasks}, State};
 handle_call({task_notice, TaskInfo}, _From, State) ->
     error_logger:info_msg("recv task notice, task:~p", [TaskInfo]),
     {reply, ok, State};
@@ -188,6 +188,7 @@ mnesia_tables() ->
     ].
 
 %callback
+-spec task_list(integer()) -> {ok, list()} | {error, list()}.
 task_list(TimeOut) ->
     gen_server:call(?SERVER, task_list, TimeOut).
 
