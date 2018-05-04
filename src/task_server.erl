@@ -37,11 +37,17 @@
 -export([
     task_dispatch/0,
     node_task_dispatch/0,
-    task_id/1
+    task_id/1,
+
+    remove_node_task/1,
+    remove_node_task/2,
+    fresh_nodes_task/0
 ]).
 
 -define(SERVER, ?MODULE).
--record(state, {}).
+-record(state, {
+    normal_fresh
+}).
 
 %%%===================================================================
 %%% API
@@ -78,7 +84,7 @@ start_link() ->
     {stop, Reason :: term()} | ignore).
 init([]) ->
     erlang:send_after(5000, self(), check),
-    {ok, #state{}}.
+    {ok, #state{normal_fresh = true}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -95,6 +101,8 @@ init([]) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
     {stop, Reason :: term(), NewState :: #state{}}).
+handle_call({update_fresh_status, FreshStatus}, _From, State) ->
+    {reply, ok, State#state{normal_fresh = FreshStatus}};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -126,9 +134,9 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: #state{}} |
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
-handle_info(check, State) ->
+handle_info(check, #state{normal_fresh = Fresh} = State) ->
     [FirstNode | _Node] = lists:sort(nodes() ++ [node()]),
-    case FirstNode == node() of
+    case FirstNode == node() andalso Fresh of
         true ->
             try
                 check_change()
@@ -236,7 +244,7 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
     stop_running_nodes:~p",[RunningNode, LastDispatchNodes, NeedDispatchNodes, StopRunningNodes]),
 
     %删除未运行节点的任务记录
-    node_task_clean(StopRunningNodes, TaskInfo),
+    stop_node_task_clean(StopRunningNodes, TaskInfo),
 
     %未运行任务列表
     TaskModule = ?TASK_MODULE,
@@ -348,7 +356,7 @@ task_cmd(NoticeNode, TaskList, Cmd) ->
     end.
 
 %删除节点的任务记录
-node_task_clean(Nodes, TaskInfo) ->
+stop_node_task_clean(Nodes, TaskInfo) ->
     lists:foreach(fun(T) ->
         {_Table, Id, Node, Task} = T,
         case lists:member(Node, Nodes) of
@@ -399,8 +407,7 @@ remote_task(Node, Module, Function, Args, Retry) ->
                     ensure_mwrite(dispatch_task, {dispatch_task, task_id(TaskInfo), Node, TaskInfo}, ?Retry);
                 task_cancel ->
                     ensure_mdelete(dispatch_task, task_id(TaskInfo), ?Retry)
-            end,
-            ok
+            end
     end.
 
 group_task(_GroupSize, [], GroupList) ->
@@ -423,7 +430,7 @@ mwrite(Table, Record) ->
     end.
 
 ensure_mwrite(_Table, _Record, 0) ->
-    ok;
+    error;
 ensure_mwrite(Table, Record, Retry) ->
     case mwrite(Table, Record) of
         ok ->
@@ -459,7 +466,7 @@ mdelete(Table, Key) ->
     end.
 
 ensure_mdelete(_Table, _Key, 0) ->
-    ok;
+    error;
 ensure_mdelete(Table, Key, Retry) ->
     case mdelete(Table, Key) of
         ok ->
@@ -497,6 +504,16 @@ node_task_dispatch() ->
 task_dispatch() ->
     mquery(dispatch_task).
 
+remove_node_task(Node) ->
+    TaskList = node_task_dispatch(),
+    NodeTask = proplists:get_value(Node, TaskList, []),
+    task_cmd(Node, NodeTask, task_cancel).
 
+remove_node_task(Node, TaskInfo) ->
+    task_cmd(Node, [TaskInfo], task_cancel).
 
-
+fresh_nodes_task() ->
+    gen_server:call(?SERVER, {update_fresh_status, false}),
+    Nodes = nodes() ++ [node()],
+    [remove_node_task(Node) || Node <- Nodes],
+    gen_server:call(?SERVER, {update_fresh_status, true}).
