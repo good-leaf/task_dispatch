@@ -4,4 +4,4 @@
 +P 1000000
 +K true
 +e 84000
--mnesia dir '"/opt/meituan/apps/logs/task_dispatch/mnesia/"'
+-mnesia dir '"/opt/apps/logs/task_dispatch/mnesia/"'

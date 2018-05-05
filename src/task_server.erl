@@ -386,8 +386,7 @@ local_task(TaskModule, Function, TaskList) ->
                 end;
             error ->
                 ignore
-        end
-          end,
+        end end,
     [Fun(TaskInfo) || TaskInfo <- TaskList].
 
 task_id(TaskInfo) ->
