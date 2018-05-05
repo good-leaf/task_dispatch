@@ -35,6 +35,7 @@
 ]).
 
 -export([
+    start/0,
     task_dispatch/0,
     node_task_dispatch/0,
     task_id/1,
@@ -52,6 +53,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+start() ->
+    gen_server:call(?SERVER, start_dispatch).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -83,7 +86,6 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    erlang:send_after(5000, self(), check),
     {ok, #state{normal_fresh = true}}.
 
 %%--------------------------------------------------------------------
@@ -103,6 +105,9 @@ init([]) ->
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_call({update_fresh_status, FreshStatus}, _From, State) ->
     {reply, ok, State#state{normal_fresh = FreshStatus}};
+handle_call(start_dispatch, _From, State) ->
+    erlang:send_after(500, self(), check),
+    {reply, ok, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
