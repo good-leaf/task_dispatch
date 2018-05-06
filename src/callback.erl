@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 02. 五月 2018 下午1:30
 %%%-------------------------------------------------------------------
--module(task_callback).
+-module(callback).
 -author("yangyajun03").
 
 -behaviour(gen_server).
