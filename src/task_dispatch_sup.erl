@@ -9,7 +9,7 @@
 
 -define(CHILDREN, [
 	?WORKER('task_server'),
-	?WORKER('task_test')
+	?WORKER('task_callback')
 ]).
 
 start_link() ->
