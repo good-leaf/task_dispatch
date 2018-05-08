@@ -95,7 +95,7 @@ handle_call(task_list, _From, State) ->
         [{name, task5}],
         [{name, task6}]
     ],
-    {reply, {ok, Tasks}, State};
+    {reply, {ok, application:get_env(task_dispatch, tasks, Tasks)}, State};
 handle_call({task_notice, TaskInfo}, _From, State) ->
     error_logger:info_msg("recv task notice, task:~p", [TaskInfo]),
     {reply, ok, State};

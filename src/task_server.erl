@@ -140,7 +140,7 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(check, #state{normal_fresh = Fresh} = State) ->
-    [FirstNode | _Node] = lists:sort(nodes() ++ [node()]),
+    [FirstNode | _Node] = lists:sort(mnesia_node(running)),
     case FirstNode == node() andalso Fresh of
         true ->
             try
@@ -251,7 +251,6 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
     %删除未运行节点的任务记录
     stop_node_task_clean(StopRunningNodes, TaskInfo),
 
-    %未运行任务列表
     TaskModule = ?TASK_MODULE,
     {ok, TaskList} = TaskModule:task_list(?NODE_TIMEOUT),
     GroupSize = case length(RunningNode) == 1 of
@@ -265,13 +264,19 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
                                 length(TaskList) div length(RunningNode) + 1
                         end
                 end,
-    %停止节点的任务列表 + 之前分配没有功能的任务列表
+    %未运行任务列表 = 总任务数 - 正在运行的任务数
     NormalNodes = LastDispatchNodes -- StopRunningNodes,
-    StopRunningTasks = TaskList -- lists:foldl(fun(NormalNode, Acc) ->
+    RunningTasks = lists:foldl(fun(NormalNode, Acc) ->
         Acc ++ proplists:get_value(NormalNode, TaskInfoList, []) end, [], NormalNodes),
+    StopRunningTasks = TaskList -- RunningTasks,
 
-    error_logger:info_msg("normal_nodes:~p, group_size:~p, stop_running_tasks:~p, convert_table:~p", [
-        NormalNodes, GroupSize, StopRunningTasks, TaskInfoList]),
+    %取消的任务列表
+    CancelTasks = RunningTasks -- TaskList,
+    cancel_dispatch(CancelTasks),
+
+    NeedStartTasks = StopRunningTasks -- CancelTasks,
+    error_logger:info_msg("normal_nodes:~p, group_size:~p, stop_running_tasks:~p, cancel_tasks:~p, need_running_tasks:~p, convert_table:~p", [
+        NormalNodes, GroupSize, StopRunningTasks, CancelTasks, NeedStartTasks, TaskInfoList]),
     case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) of
         true ->
             %节点未变更，存在未分配成功的任务
@@ -350,6 +355,19 @@ subtract_dispatch(RunningNodes, GroupSize, StopRunningTasks, TaskInfoList) ->
                     subtract_dispatch(OtherNodes, GroupSize, StopRunningTasks, TaskInfoList)
             end
     end.
+
+cancel_dispatch(CancelTasks) ->
+    Fun = fun(Task) ->
+        TaskId = task_id(Task),
+        case mdirty_read(dispatch_task, TaskId) of
+            {ok, [Node, Task]} ->
+                task_cmd(Node, [Task], task_cancel);
+            _R ->
+                ok
+        end
+        end,
+    [Fun(Task) || Task <- CancelTasks].
+
 
 task_cmd(NoticeNode, TaskList, Cmd) ->
     case NoticeNode == node() of
@@ -487,8 +505,8 @@ mdirty_read(Table, Key) ->
     case mnesia:dirty_read({Table, Key}) of
         [] ->
             {error, empty};
-        [{Table, Key, Cfg}] ->
-            {ok, Cfg};
+        [{Table, Key, Node, Cfg}] ->
+            {ok, [Node, Cfg]};
         Error ->
             {error, Error}
     end.
