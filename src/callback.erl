@@ -68,6 +68,10 @@ start_link() ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    %节点重启清理之前的任务数据
+    task_server:node_register(node()),
+    %开启主节点竞争
+    task_server:start(),
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------

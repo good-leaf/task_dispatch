@@ -36,6 +36,7 @@
 
 -export([
     start/0,
+    node_register/1,
     task_dispatch/0,
     node_task_dispatch/0,
     task_id/1,
@@ -140,8 +141,7 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(check, #state{normal_fresh = Fresh} = State) ->
-    [FirstNode | _Node] = lists:sort(mnesia_node(running)),
-    case FirstNode == node() andalso Fresh of
+    case master_node() andalso Fresh of
         true ->
             try
                 check_change()
@@ -191,6 +191,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+node_register(Node) ->
+    TaskList = node_task_dispatch(),
+    Tasks = proplists:get_value(Node, TaskList, []),
+    [ensure_mdelete(dispatch_task, task_id(Task), ?Retry) || Task <- Tasks].
+
 %各节点所属的任务，由节点自己保证任务的正常运行
 %任务迁移时，先取消占用，才能再分配
 check_change() ->
@@ -205,12 +210,12 @@ check_change() ->
                 Acc ++ [Node]
         end end, [], TaskInfo),
 
-    RunningTaskSize = length(TaskInfo),
+    RunningTasks = lists:foldl(fun(T, Acc) -> {_Table, _Id, _Node, Task} = T, Acc ++ [Task] end, [], TaskInfo),
     TaskModule = ?TASK_MODULE,
     {ok, TaskList} = TaskModule:task_list(?NODE_TIMEOUT),
-    TaskSize = length(TaskList),
+
     %节点数变更
-    case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) andalso TaskSize == RunningTaskSize of
+    case lists:sort(LastDispatchNodes) == lists:sort(RunningNode) andalso lists:sort(TaskList) == lists:sort(RunningTasks) of
         true ->
             ignore;
         false ->
@@ -536,6 +541,10 @@ remove_node_task(Node, TaskInfo) ->
 
 fresh_nodes_task() ->
     gen_server:call(?SERVER, {update_fresh_status, false}),
-    Nodes = nodes() ++ [node()],
+    Nodes = mnesia_node(running),
     [remove_node_task(Node) || Node <- Nodes],
     gen_server:call(?SERVER, {update_fresh_status, true}).
+
+master_node() ->
+    [FirstNode | _Node] = lists:sort(mnesia_node(running)),
+    FirstNode == node().
