@@ -226,17 +226,7 @@ check_change() ->
 dispatch_task(RunningNode, [], _TaskInfo) ->
     TaskModule = ?TASK_MODULE,
     {ok, TaskList} = TaskModule:task_list(?NODE_TIMEOUT),
-    GroupSize = case length(RunningNode) == 1 of
-                    true ->
-                        length(TaskList) div length(RunningNode);
-                    false ->
-                        case length(TaskList) rem 2 == 0 of
-                            true ->
-                                length(TaskList) div length(RunningNode);
-                            false ->
-                                length(TaskList) div length(RunningNode) + 1
-                        end
-                end,
+    GroupSize = group_size(length(TaskList), length(RunningNode)),
     GroupList = group_task(GroupSize, TaskList, []),
 
     lists:zipwith(fun(Node, Tasks) -> task_cmd(Node, Tasks, task_notice) end, RunningNode, GroupList);
@@ -258,17 +248,8 @@ dispatch_task(RunningNode, LastDispatchNodes, TaskInfo) ->
 
     TaskModule = ?TASK_MODULE,
     {ok, TaskList} = TaskModule:task_list(?NODE_TIMEOUT),
-    GroupSize = case length(RunningNode) == 1 of
-                    true ->
-                        length(TaskList) div length(RunningNode);
-                    false ->
-                        case length(TaskList) rem 2 == 0 of
-                            true ->
-                                length(TaskList) div length(RunningNode);
-                            false ->
-                                length(TaskList) div length(RunningNode) + 1
-                        end
-                end,
+    GroupSize = group_size(length(TaskList), length(RunningNode)),
+
     %未运行任务列表 = 总任务数 - 正在运行的任务数
     NormalNodes = LastDispatchNodes -- StopRunningNodes,
     RunningTasks = lists:foldl(fun(NormalNode, Acc) ->
@@ -437,11 +418,29 @@ remote_task(Node, Module, Function, Args, Retry) ->
             end
     end.
 
+group_size(AllNum, GroupNum) ->
+    case GroupNum == 1 of
+        true ->
+            AllNum;
+        false ->
+            case AllNum rem GroupNum == 0 of
+                true ->
+                    AllNum div GroupNum;
+                false ->
+                    AllNum div GroupNum + 1
+            end
+    end.
+
 group_task(_GroupSize, [], GroupList) ->
     GroupList;
 group_task(GroupSize, TaskList, GroupList) ->
-    {FirstList, RemainList} = lists:split(GroupSize, TaskList),
-    group_task(GroupSize, RemainList, GroupList ++ [FirstList]).
+    case GroupSize > length(TaskList) of
+        true ->
+            group_task(GroupSize, [], GroupList ++ [TaskList]);
+        false ->
+            {FirstList, RemainList} = lists:split(GroupSize, TaskList),
+            group_task(GroupSize, RemainList, GroupList ++ [FirstList])
+    end.
 
 mwrite(Table, Record) ->
     F = fun() ->
